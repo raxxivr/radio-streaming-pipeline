@@ -11,7 +11,7 @@ load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME", "nyc_yellow_taxi_trip")
+DB_NAME = os.getenv("DB_NAME", "radio_pipeline")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
