@@ -24,9 +24,9 @@ polling loop can be added later.
 | 1 | Extract: API fetch, raw JSON, country CSV | Done |
 | 2 | Transform: clean stations and validate country codes | Done |
 | 3 | Load: country and stations tables in PostgreSQL | Done |
-| 4 | Analytical SQL: five separate query files | Next |
-| 5 | Integration test: one end-to-end check | Next |
-| 6 | Root orchestrator: `run_pipeline.py` | Later |
+| 4 | Analytical SQL: five separate query files | Done |
+| 5 | Test suite for the ETL stages | Done |
+| 6 | Root orchestrator: `run_pipeline.py` | Next |
 | 7 | Documentation: README, ERD, plan | Done |
 
 ## Phase 0 - Repository scaffold
@@ -119,9 +119,11 @@ transform and load stages together.
 Design decision: each run is a full refresh. The loader truncates the target
 tables and appends the current snapshot.
 
-Follow-up task: remove the unused `country_name`, `continent`, and `sub_region`
-columns from the `stations` DDL. The normalized schema keeps those fields only in
-`country`.
+Schema cleanup: the unused `country_name`, `continent`, and `sub_region` columns
+were removed from the `stations` DDL. Country metadata now lives only in
+`country`. Existing databases created before this change may still contain the
+old columns because `CREATE TABLE IF NOT EXISTS` does not alter an existing
+table.
 
 Acceptance criteria:
 
@@ -132,7 +134,7 @@ Acceptance criteria:
 
 ## Phase 4 - Analytical SQL
 
-Next. Create five separate SQL files, one question per file.
+Done. The five SQL files are implemented, one question per file.
 
 | File | Question |
 | --- | --- |
@@ -142,45 +144,67 @@ Next. Create five separate SQL files, one question per file.
 | `sql/avg_bitrate_by_codec.sql` | What is the average bitrate by codec? |
 | `sql/metadata_completeness.sql` | How much metadata is missing? |
 
-Each query should join `stations` to `country` on:
+Implementation notes:
 
-```sql
-stations.countrycode = country.country_code
-```
+- `stations_by_continent.sql` starts from `stations` and left joins `country`,
+  so the 5 stations with no matched country code remain in the `Unknown`
+  bucket. The current snapshot returns 6 rows with `Unknown = 14`.
+- `stations_by_country.sql` starts from `stations` and inner joins `country`, so
+  it returns only countries with at least one station. The current snapshot
+  returns 77 rows covering 995 stations.
+- `codec_distribution.sql` normalizes blank codecs and calculates share with a
+  window function.
+- `avg_bitrate_by_codec.sql` filters to `bitrate > 0` before averaging.
+- `metadata_completeness.sql` uses `CROSS JOIN LATERAL` and `COUNT(*) FILTER`
+  to return one row per metadata field.
 
-Use a left join so stations with a blank or unknown country code still appear in
-metadata-quality results.
-
-Acceptance criteria:
-
-- Each file runs independently with `psql`.
-- Continent and country results use the `country` table, not duplicated station
-  columns.
-- Missing metadata is counted, not hidden.
-- The five queries answer the questions above without manual cleanup.
-
-## Phase 5 - Integration test
-
-Next. `tests/test_pipeline.py` is intentionally blank for now.
-
-The test should:
-
-- Use dummy station records and a small dummy country lookup.
-- Avoid the live API.
-- Run the pipeline stages.
-- Assert that the PostgreSQL `stations` table receives rows without raising an
-  exception.
+All five files were run successfully against the local `radio_pipeline`
+database.
 
 Acceptance criteria:
 
-- The test runs against a reachable PostgreSQL database configured through
-  `.env`.
-- The test does not call the live Radio Browser API.
-- The test fails if the load stage stops writing rows.
+- [x] Each file runs independently with `psql`.
+- [x] Continent and country results use the `country` table, not duplicated
+  station columns.
+- [x] Missing metadata is counted, not hidden.
+- [x] The five queries answer the questions above without manual cleanup.
+
+## Phase 5 - Test suite
+
+Done. `tests/test_pipeline.py` imports the real ETL modules:
+
+- `scripts.extract`
+- `scripts.transform`
+- `scripts.load`
+
+The suite mocks `requests.get` and the load functions, so it does not call the
+live API and does not modify PostgreSQL.
+
+Coverage:
+
+- API request parameters and station-field filtering.
+- API failure propagation.
+- Station cleaning, deduplication, trimming, and numeric casting.
+- Invalid country-code handling.
+- `run_transform()` returning station and country DataFrames separately.
+- `run_load()` loading `country` before `stations`.
+- Raw JSON envelope writing.
+
+Current result: `7 passed`.
+
+Acceptance criteria:
+
+- [x] The test runs without the live Radio Browser API.
+- [x] The test runs without a reachable PostgreSQL database.
+- [x] The test fails if the transform or load orchestration regresses.
+
+Live PostgreSQL integration coverage is optional and is not part of the current
+suite.
 
 ## Phase 6 - Root orchestrator
 
-Later. `run_pipeline.py` is currently a placeholder.
+Next and final implementation step. `run_pipeline.py` is intentionally empty for
+now.
 
 The orchestrator should:
 
@@ -247,26 +271,28 @@ LEFT JOIN country AS c
 - `country_lookup.csv` is downloaded by extract and is not committed.
 - The loader uses `TRUNCATE ... CASCADE` on `country`, which also clears
   `stations`; load `country` first, then `stations`.
-- `run_pipeline.py`, the analytical SQL files, and the integration test are
-  placeholders at this stage.
-- The `stations` DDL still contains unused country columns; analytics should use
-  the `country` table.
+- `run_pipeline.py` is the only remaining implementation step.
+- The test suite mocks database writes, so live PostgreSQL connectivity is not
+  exercised.
+- Existing databases created before the schema cleanup may still contain the old
+  unused country columns; `CREATE TABLE IF NOT EXISTS` does not alter an
+  existing table.
+- SQL results depend on the current API snapshot and country lookup.
 
 ## Definition of done
 
 - [x] Extract writes raw JSON and downloads the country CSV.
 - [x] Transform cleans station rows and validates country codes.
 - [x] Load writes `country` and `stations` to PostgreSQL.
-- [ ] Five analytical SQL files are implemented.
-- [ ] Integration test passes.
+- [x] Five analytical SQL files are implemented.
+- [x] All five SQL files run successfully against the local database.
+- [x] Test suite passes.
 - [ ] `run_pipeline.py` runs all stages in order.
 - [x] README, ERD, and implementation plan are updated.
-- [ ] Unused country columns are removed from `stations`.
+- [x] Unused country columns are removed from the `stations` DDL.
 
 ## Next actions
 
-1. Implement the five SQL files in `sql/`.
-2. Implement the integration test in `tests/test_pipeline.py`.
-3. Run the SQL files and capture sample results for the README.
-4. Wire `run_pipeline.py`.
-5. Remove the unused country columns from the `stations` DDL.
+1. Implement `run_pipeline.py` as the final step.
+2. Run the full pipeline once through the orchestrator.
+3. Optionally add a live PostgreSQL integration test.
