@@ -147,11 +147,12 @@ Done. The five SQL files are implemented, one question per file.
 Implementation notes:
 
 - `stations_by_continent.sql` starts from `stations` and left joins `country`,
-  so the 5 stations with no matched country code remain in the `Unknown`
-  bucket. The current snapshot returns 6 rows with `Unknown = 14`.
+  so stations with no matched country code, plus matched countries with a blank
+  continent, remain in the `Unknown` bucket. The current snapshot returns
+  6 rows with `Unknown = 12`.
 - `stations_by_country.sql` starts from `stations` and inner joins `country`, so
   it returns only countries with at least one station. The current snapshot
-  returns 77 rows covering 995 stations.
+  returns 83 rows covering 996 stations.
 - `codec_distribution.sql` normalizes blank codecs and calculates share with a
   window function.
 - `avg_bitrate_by_codec.sql` filters to `bitrate > 0` before averaging.
@@ -171,14 +172,24 @@ Acceptance criteria:
 
 ## Phase 5 - Test suite
 
-Done. `tests/test_pipeline.py` imports the real ETL modules:
+Done. The default suite contains unit tests and one PostgreSQL integration test.
+
+`tests/test_pipeline.py` imports the real ETL modules:
 
 - `scripts.extract`
 - `scripts.transform`
 - `scripts.load`
 
-The suite mocks `requests.get` and the load functions, so it does not call the
-live API and does not modify PostgreSQL.
+The unit tests mock `requests.get` and the load functions, so they do not call
+the live API and do not modify PostgreSQL.
+
+`tests/test_postgres_integration.py` creates a temporary database, runs
+`create_tables()` and `load_dataframe()` against it, verifies the table columns,
+loaded timestamps, foreign key, primary key, and `NOT NULL` constraints, then
+drops the database. It skips cleanly when PostgreSQL is unavailable.
+
+The committed `data/samples/` fixture is also tested so the transform can be
+reproduced without the live API.
 
 Coverage:
 
@@ -189,17 +200,19 @@ Coverage:
 - `run_transform()` returning station and country DataFrames separately.
 - `run_load()` loading `country` before `stations`.
 - Raw JSON envelope writing.
+- Committed sample snapshot transformation.
+- Temporary PostgreSQL schema, load, and constraint checks.
 
-Current result: `7 passed`.
+Current result: `9 passed` locally. Without PostgreSQL the integration test
+skips and the unit result is `8 passed, 1 skipped`.
 
 Acceptance criteria:
 
-- [x] The test runs without the live Radio Browser API.
-- [x] The test runs without a reachable PostgreSQL database.
-- [x] The test fails if the transform or load orchestration regresses.
-
-Live PostgreSQL integration coverage is optional and is not part of the current
-suite.
+- [x] The unit tests run without the live Radio Browser API.
+- [x] The integration test skips cleanly without PostgreSQL.
+- [x] The integration test covers real database schema, load, and constraints.
+- [x] The committed sample fixture reproduces the transform without the live API.
+- [x] The suite fails if the transform or load orchestration regresses.
 
 ## Phase 6 - Root orchestrator
 
@@ -225,6 +238,7 @@ Done.
 
 - `README.md` describes the pipeline, setup, analytics, and limitations.
 - `docs/analytics_results.png` shows the current analytics dashboard.
+- `data/samples/` provides a committed reproducible transformation fixture.
 - `docs/erd.md` documents the two-table normalized schema and SQL join.
 - This file records the implementation plan and current status.
 
@@ -274,12 +288,14 @@ LEFT JOIN country AS c
 - `country_lookup.csv` is downloaded by extract and is not committed.
 - The loader uses `TRUNCATE ... CASCADE` on `country`, which also clears
   `stations`; load `country` first, then `stations`.
-- The test suite mocks database writes, so live PostgreSQL connectivity is not
-  exercised.
+- The unit tests mock database writes; the integration test requires a reachable
+  PostgreSQL server and `CREATEDB` permission, and skips otherwise.
 - Existing databases created before the schema cleanup may still contain the old
   unused country columns; `CREATE TABLE IF NOT EXISTS` does not alter an
   existing table.
 - SQL results depend on the current API snapshot and country lookup.
+- The committed sample snapshot is synthetic and small; it is for reproducible
+  transformation checks, not analysis.
 - The analytics dashboard is a point-in-time view; refreshing the snapshot
   changes the numbers.
 
@@ -291,6 +307,8 @@ LEFT JOIN country AS c
 - [x] Five analytical SQL files are implemented.
 - [x] All five SQL files run successfully against the local database.
 - [x] Test suite passes.
+- [x] PostgreSQL integration test creates and drops a temporary database.
+- [x] Committed sample snapshot reproduces the transform without the live API.
 - [x] `run_pipeline.py` runs all stages in order.
 - [x] README, ERD, and implementation plan are updated.
 - [x] Unused country columns are removed from the `stations` DDL.
@@ -298,5 +316,5 @@ LEFT JOIN country AS c
 ## Next actions
 
 1. Optionally add a scheduler or continuous polling loop.
-2. Optionally add a live PostgreSQL integration test.
+2. Optionally expand the sample fixture or add analytics fixtures.
 3. Optionally rebuild the analytics dashboard after a data refresh.

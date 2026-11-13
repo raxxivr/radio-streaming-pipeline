@@ -11,7 +11,8 @@ two tables.
 The pipeline is complete. Extract, transform, load, all five analytical SQL
 queries, and the test suite are implemented. `python run_pipeline.py` runs the
 full sequence: extract, transform/load, analytics, and tests. The test suite
-passes: `7 passed`.
+passes: `9 passed` locally; the PostgreSQL integration test skips when no
+database is available.
 
 ## Snapshot
 
@@ -52,6 +53,20 @@ The country lookup is downloaded by `scripts/extract.py` from a pinned ISO-3166
 source. It is not committed because `data/raw/` is gitignored. A fresh clone
 must run the extract stage before the transform stage.
 
+## Reproducible sample snapshot
+
+`data/samples/` contains a small, synthetic snapshot that is committed for
+reproducible inspection. It includes a duplicate UUID, a missing name,
+whitespace, blank and invalid country codes, and invalid or zero bitrates. The
+fixture lets reviewers see the cleaning rules without calling the live API or
+needing PostgreSQL:
+
+```powershell
+python -m scripts.run_sample_transform
+```
+
+The same fixture is exercised by `pytest -q`.
+
 ## Architecture
 
 ```text
@@ -70,6 +85,7 @@ run_pipeline.py
       |
       `--> pytest
              tests/test_pipeline.py
+             tests/test_postgres_integration.py (temporary database)
 ```
 
 `scripts/load.py` calls `run_transform()` and then `run_load()`, so the second
@@ -81,7 +97,7 @@ pipeline step performs the transform and load stages together.
 
 - Python 3.10+
 - PostgreSQL running locally
-- A PostgreSQL user that can create tables
+- A PostgreSQL user that can create tables and temporary databases
 
 ### 1. Create the database
 
@@ -162,8 +178,17 @@ python -m scripts.transform
 pytest -q
 ```
 
-The tests import the real ETL modules but mock `requests.get` and the database
-write functions. They do not call the live API or modify PostgreSQL.
+The unit tests import the real ETL modules but mock `requests.get` and the
+database write functions. They do not call the live API or modify PostgreSQL.
+
+A separate integration test creates a temporary database, verifies the real
+schema, load path, foreign key, primary key, and `NOT NULL` constraints, then
+drops the database. It skips cleanly when PostgreSQL is unavailable or the user
+lacks `CREATEDB` permission. To run only the fast unit tests:
+
+```powershell
+pytest -q -m "not integration"
+```
 
 ## Analytics
 
@@ -228,7 +253,8 @@ stages only read from it.
 ```text
 radio-streaming-pipeline/
 |-- data/
-|   `-- raw/                      # generated JSON + downloaded country CSV (gitignored)
+|   |-- raw/                      # generated JSON + downloaded country CSV (gitignored)
+|   `-- samples/                  # committed synthetic snapshot + README
 |-- docs/
 |   |-- analytics_results.png     # analytics dashboard used in this README
 |   |-- erd.md                    # normalized ERD and SQL joins
@@ -237,7 +263,8 @@ radio-streaming-pipeline/
 |   |-- extract.py                # API fetch + country CSV download
 |   |-- transform.py              # clean stations and validate country codes
 |   |-- load.py                   # create tables and load PostgreSQL
-|   `-- run_analytics.py          # execute and print the five SQL queries
+|   |-- run_analytics.py          # execute and print the five SQL queries
+|   `-- run_sample_transform.py   # inspect transform without the live API
 |-- sql/
 |   |-- stations_by_continent.sql
 |   |-- stations_by_country.sql
@@ -245,10 +272,12 @@ radio-streaming-pipeline/
 |   |-- avg_bitrate_by_codec.sql
 |   `-- metadata_completeness.sql
 |-- tests/
-|   `-- test_pipeline.py          # ETL tests (API and DB writes mocked)
+|   |-- test_pipeline.py          # ETL tests (API and DB writes mocked)
+|   `-- test_postgres_integration.py
 |-- .env                          # local values (gitignored)
 |-- .env.example
 |-- .gitignore
+|-- pytest.ini
 |-- README.md
 |-- requirements.txt
 `-- run_pipeline.py               # full pipeline entry point
@@ -260,12 +289,14 @@ radio-streaming-pipeline/
   stations.
 - The API is live, so two extract runs can return different rows.
 - There is no scheduler or continuous polling loop yet.
-- The test suite mocks database writes, so it does not verify live PostgreSQL
-  connectivity.
+- The PostgreSQL integration test requires a reachable server and `CREATEDB`
+  permission; it skips when unavailable.
 - Existing databases created before the schema cleanup may still contain the old
   unused `country_name`, `continent`, and `sub_region` columns on `stations`;
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table.
 - Raw data is not committed, so a fresh clone must run extract before transform.
+- The committed sample snapshot is synthetic and small; it is for reproducible
+  transformation checks, not analysis.
 - The analytics dashboard reflects the current snapshot; refreshing the data
   changes the numbers.
 
