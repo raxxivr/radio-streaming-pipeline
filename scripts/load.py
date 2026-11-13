@@ -54,7 +54,7 @@ def create_tables(db_engine=engine):
       loaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   """
-  with engine.begin() as conn:
+  with db_engine.begin() as conn:
     conn.exec_driver_sql(ddl_statements)
   print("Tables created successfully.")
 

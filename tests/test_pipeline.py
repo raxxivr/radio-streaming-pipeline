@@ -210,3 +210,36 @@ def test_save_raw_json_writes_expected_envelope(tmp_path):
     assert payload["count"] == 1
     assert payload["stations"][0]["stationuuid"] == "s1"
     assert "fetched_at" in payload
+
+
+def test_committed_sample_snapshot_transforms_reproducibly():
+    sample_dir = PROJECT_ROOT / "data" / "samples"
+
+    raw = transform.load_raw_stations(sample_dir / "stations_sample.json")
+    country = transform.load_country_lookup(
+        sample_dir / "country_lookup_sample.csv"
+    )
+    cleaned = transform.clean_stations(raw)
+    valid = transform.clean_invalid_country_codes(cleaned, country)
+
+    assert len(raw) == 10
+    assert len(cleaned) == 8
+    assert len(valid) == 8
+
+    assert valid["stationuuid"].tolist() == [
+        "sample-0001",
+        "sample-0002",
+        "sample-0003",
+        "sample-0006",
+        "sample-0007",
+        "sample-0008",
+        "sample-0009",
+        "sample-0010",
+    ]
+    assert valid.loc[2, "name"] == "Sample Classical"
+    assert valid.loc[2, "countrycode"] == "DE"
+    assert pd.isna(valid.loc[4, "countrycode"])
+    assert pd.isna(valid.loc[4, "bitrate"])
+    assert pd.isna(valid.loc[5, "countrycode"])
+    assert pd.isna(valid.loc[5, "bitrate"])
+    assert valid.loc[3, "bitrate"] == 0
