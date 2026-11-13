@@ -8,9 +8,14 @@ two tables.
 
 ## Status
 
-The extract, transform, and load stages are implemented. The five analytical SQL
-files and the integration test are placeholders for the next milestone.
-`run_pipeline.py` is also a placeholder; run the stages individually for now.
+Extract, transform, and load are implemented. All five analytical SQL queries
+are implemented and were run against the local `radio_pipeline` database. The
+test suite is implemented and passes: `7 passed`.
+
+`run_pipeline.py` is the only remaining implementation step and is intentionally
+left as an empty placeholder. Run the stages individually until it is wired. The
+tests mock the API and database writes, so they do not require a live PostgreSQL
+connection.
 
 ## Problem
 
@@ -124,7 +129,7 @@ DB_PASSWORD=your-password
 
 `.env` is gitignored. Only `.env.example` with placeholder values is committed.
 
-### 4. Run the pipeline
+### 4. Run the ETL stages
 
 Run the extract stage first:
 
@@ -148,10 +153,21 @@ stage can also be run alone for debugging:
 python -m scripts.transform
 ```
 
+`run_pipeline.py` is the planned one-command entry point and is the final
+remaining implementation step. Until it is wired, use the stage commands above.
+
+### 5. Run the tests
+
+```powershell
+pytest -q
+```
+
+The tests import the real ETL modules but mock `requests.get` and the database
+write functions. They do not call the live API or modify PostgreSQL.
+
 ## Analytics
 
-The five SQL files are intentionally empty placeholders for the next milestone.
-Once implemented, each file should be runnable on its own:
+The five SQL files are implemented. Run each one on its own:
 
 ```powershell
 psql -U postgres -d radio_pipeline -f sql/stations_by_continent.sql
@@ -161,8 +177,14 @@ psql -U postgres -d radio_pipeline -f sql/avg_bitrate_by_codec.sql
 psql -U postgres -d radio_pipeline -f sql/metadata_completeness.sql
 ```
 
-The analytical queries use a left join so stations with a blank or unknown
-country code still appear in metadata-quality results:
+The queries use two join patterns:
+
+- `stations_by_continent.sql` starts from `stations` and left joins `country`, so
+  stations without a matched country code stay in the `Unknown` bucket.
+- `stations_by_country.sql` starts from `stations` and joins `country`, so it
+  returns only countries with at least one station.
+
+The generic analytical join is:
 
 ```sql
 SELECT
@@ -174,6 +196,18 @@ FROM stations AS s
 LEFT JOIN country AS c
     ON s.countrycode = c.country_code;
 ```
+
+### Sample results
+
+Current snapshot: 1,000 stations.
+
+| Query | Current result |
+| --- | --- |
+| Continent | Europe 441, Asia 278, Americas 133, Africa 132, Unknown 14, Oceania 2 |
+| Country | 77 countries; DE 105, US 88, TR 62 |
+| Codec | MP3 68.6%, AAC 13.7%, AAC+ 11.1% |
+| Avg bitrate | OGG 422.25 kbps over 4 stations |
+| Metadata | tags 22.9% missing, bitrate 17.1% missing |
 
 ## Reruns and raw data
 
@@ -196,7 +230,7 @@ radio-streaming-pipeline/
 |-- data/
 |   `-- raw/                      # generated JSON + downloaded country CSV (gitignored)
 |-- docs/
-|   |-- erd.md                    # normalized ERD and SQL join
+|   |-- erd.md                    # normalized ERD and SQL joins
 |   `-- project_guide.md          # implementation plan and current status
 |-- scripts/
 |   |-- extract.py                # API fetch + country CSV download
@@ -209,13 +243,13 @@ radio-streaming-pipeline/
 |   |-- avg_bitrate_by_codec.sql
 |   `-- metadata_completeness.sql
 |-- tests/
-|   `-- test_pipeline.py          # placeholder for the next milestone
+|   `-- test_pipeline.py          # ETL tests (API and DB writes mocked)
 |-- .env                          # local values (gitignored)
 |-- .env.example
 |-- .gitignore
 |-- README.md
 |-- requirements.txt
-`-- run_pipeline.py               # placeholder; wire later
+`-- run_pipeline.py               # final entry point; to be implemented
 ```
 
 ## Limitations
@@ -224,11 +258,12 @@ radio-streaming-pipeline/
   stations.
 - The API is live, so two extract runs can return different rows.
 - There is no scheduler or continuous polling loop yet.
-- `run_pipeline.py` is a placeholder; run the stages individually for now.
-- The five SQL files and the integration test are empty placeholders.
-- The `stations` DDL still contains unused `country_name`, `continent`, and
-  `sub_region` columns. Analytics should use the `country` table; remove the
-  extra columns in a follow-up.
+- `run_pipeline.py` is not implemented yet; run the stages individually for now.
+- The test suite mocks database writes, so it does not verify live PostgreSQL
+  connectivity.
+- Existing databases created before the schema cleanup may still contain the old
+  unused `country_name`, `continent`, and `sub_region` columns on `stations`;
+  `CREATE TABLE IF NOT EXISTS` does not alter an existing table.
 - Raw data is not committed, so a fresh clone must run extract before transform.
 
 ## Implementation plan
