@@ -8,14 +8,17 @@ two tables.
 
 ## Status
 
-Extract, transform, and load are implemented. All five analytical SQL queries
-are implemented and were run against the local `radio_pipeline` database. The
-test suite is implemented and passes: `7 passed`.
+The pipeline is complete. Extract, transform, load, all five analytical SQL
+queries, and the test suite are implemented. `python run_pipeline.py` runs the
+full sequence: extract, transform/load, analytics, and tests. The test suite
+passes: `7 passed`.
 
-`run_pipeline.py` is the only remaining implementation step and is intentionally
-left as an empty placeholder. Run the stages individually until it is wired. The
-tests mock the API and database writes, so they do not require a live PostgreSQL
-connection.
+## Snapshot
+
+![Radio streaming pipeline analytics dashboard](docs/analytics_results.png)
+
+Current analytical output from the loaded snapshot. The image contains only the
+results of the five analytics queries, not the test output.
 
 ## Problem
 
@@ -52,26 +55,25 @@ must run the extract stage before the transform stage.
 ## Architecture
 
 ```text
-Radio Browser API
-        |
-        v
-data/raw/stations_<timestamp>.json   (gitignored)
-        |
-        v
-scripts/transform.py
-  clean -> type-cast -> validate country codes
-        |
-        v
-scripts/load.py
-  country table  +  stations table
-        |
-        v
-analytical SQL
-  stations LEFT JOIN country ON countrycode = country_code
+run_pipeline.py
+      |
+      +--> scripts/extract.py
+      |      Radio Browser API -> data/raw/stations_<timestamp>.json
+      |      Country lookup     -> data/raw/country_lookup.csv
+      |
+      +--> scripts/load.py
+      |      scripts/transform.py (clean + validate)
+      |      -> country table + stations table
+      |
+      +--> scripts/run_analytics.py
+      |      sql/*.sql -> printed result sets
+      |
+      `--> pytest
+             tests/test_pipeline.py
 ```
 
-`scripts/load.py` calls `run_transform()` and then `run_load()`, so the load
-command performs the transform and load stages together.
+`scripts/load.py` calls `run_transform()` and then `run_load()`, so the second
+pipeline step performs the transform and load stages together.
 
 ## Setup
 
@@ -129,32 +131,30 @@ DB_PASSWORD=your-password
 
 `.env` is gitignored. Only `.env.example` with placeholder values is committed.
 
-### 4. Run the ETL stages
+### 4. Run the pipeline
 
-Run the extract stage first:
+Run all stages in order:
+
+```powershell
+python run_pipeline.py
+```
+
+This runs extract, transform/load, analytics, and tests. A failure stops the
+pipeline immediately.
+
+The stages can also be run individually for debugging:
 
 ```powershell
 python -m scripts.extract
-```
-
-This writes a timestamped JSON file and downloads `country_lookup.csv` into
-`data/raw/`.
-
-Then run the transform and load stages:
-
-```powershell
 python -m scripts.load
+python -m scripts.run_analytics
 ```
 
-`scripts/load.py` calls `run_transform()` and loads both tables. The transform
-stage can also be run alone for debugging:
+The transform stage can be run alone for inspection:
 
 ```powershell
 python -m scripts.transform
 ```
-
-`run_pipeline.py` is the planned one-command entry point and is the final
-remaining implementation step. Until it is wired, use the stage commands above.
 
 ### 5. Run the tests
 
@@ -203,11 +203,11 @@ Current snapshot: 1,000 stations.
 
 | Query | Current result |
 | --- | --- |
-| Continent | Europe 441, Asia 278, Americas 133, Africa 132, Unknown 14, Oceania 2 |
-| Country | 77 countries; DE 105, US 88, TR 62 |
-| Codec | MP3 68.6%, AAC 13.7%, AAC+ 11.1% |
-| Avg bitrate | OGG 422.25 kbps over 4 stations |
-| Metadata | tags 22.9% missing, bitrate 17.1% missing |
+| Continent | Europe 471, Asia 279, Americas 152, Africa 81, Unknown 12, Oceania 5 |
+| Country | 83 countries; DE 108, US 96, IN 62 |
+| Codec | MP3 67.3%, AAC 14.3%, AAC+ 11.5% |
+| Avg bitrate | AAC+ 647.46 kbps over 112 stations |
+| Metadata | tags 23.6% missing, bitrate 17.1% missing |
 
 ## Reruns and raw data
 
@@ -230,12 +230,14 @@ radio-streaming-pipeline/
 |-- data/
 |   `-- raw/                      # generated JSON + downloaded country CSV (gitignored)
 |-- docs/
+|   |-- analytics_results.png     # analytics dashboard used in this README
 |   |-- erd.md                    # normalized ERD and SQL joins
 |   `-- project_guide.md          # implementation plan and current status
 |-- scripts/
 |   |-- extract.py                # API fetch + country CSV download
 |   |-- transform.py              # clean stations and validate country codes
-|   `-- load.py                   # create tables and load PostgreSQL
+|   |-- load.py                   # create tables and load PostgreSQL
+|   `-- run_analytics.py          # execute and print the five SQL queries
 |-- sql/
 |   |-- stations_by_continent.sql
 |   |-- stations_by_country.sql
@@ -249,7 +251,7 @@ radio-streaming-pipeline/
 |-- .gitignore
 |-- README.md
 |-- requirements.txt
-`-- run_pipeline.py               # final entry point; to be implemented
+`-- run_pipeline.py               # full pipeline entry point
 ```
 
 ## Limitations
@@ -258,13 +260,14 @@ radio-streaming-pipeline/
   stations.
 - The API is live, so two extract runs can return different rows.
 - There is no scheduler or continuous polling loop yet.
-- `run_pipeline.py` is not implemented yet; run the stages individually for now.
 - The test suite mocks database writes, so it does not verify live PostgreSQL
   connectivity.
 - Existing databases created before the schema cleanup may still contain the old
   unused `country_name`, `continent`, and `sub_region` columns on `stations`;
   `CREATE TABLE IF NOT EXISTS` does not alter an existing table.
 - Raw data is not committed, so a fresh clone must run extract before transform.
+- The analytics dashboard reflects the current snapshot; refreshing the data
+  changes the numbers.
 
 ## Implementation plan
 

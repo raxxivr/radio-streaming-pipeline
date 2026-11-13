@@ -26,7 +26,7 @@ polling loop can be added later.
 | 3 | Load: country and stations tables in PostgreSQL | Done |
 | 4 | Analytical SQL: five separate query files | Done |
 | 5 | Test suite for the ETL stages | Done |
-| 6 | Root orchestrator: `run_pipeline.py` | Next |
+| 6 | Root orchestrator: `run_pipeline.py` | Done |
 | 7 | Documentation: README, ERD, plan | Done |
 
 ## Phase 0 - Repository scaffold
@@ -159,7 +159,7 @@ Implementation notes:
   to return one row per metadata field.
 
 All five files were run successfully against the local `radio_pipeline`
-database.
+database. `scripts/run_analytics.py` executes them and prints the result sets.
 
 Acceptance criteria:
 
@@ -203,25 +203,28 @@ suite.
 
 ## Phase 6 - Root orchestrator
 
-Next and final implementation step. `run_pipeline.py` is intentionally empty for
-now.
+Done. `run_pipeline.py` runs the full pipeline:
 
-The orchestrator should:
+1. `scripts.extract` - fetch the API snapshot and country lookup.
+2. `scripts.load` - transform and load both tables.
+3. `scripts.run_analytics` - execute and print the five SQL queries.
+4. `pytest -q` - run the ETL test suite.
 
-- Run extract, transform, and load in order.
-- Stop at the first failure.
-- Return a non-zero exit code on failure.
+The orchestration uses `python -m` so package imports resolve correctly. It
+stops at the first non-zero exit code.
 
 Acceptance criteria:
 
-- `python run_pipeline.py` performs a full refresh in one command.
-- The individual stages remain runnable for debugging.
+- [x] `python run_pipeline.py` performs a full refresh and runs analytics.
+- [x] The individual stages remain runnable for debugging.
+- [x] The pipeline stops at the first failure.
 
 ## Phase 7 - Documentation
 
 Done.
 
 - `README.md` describes the pipeline, setup, analytics, and limitations.
+- `docs/analytics_results.png` shows the current analytics dashboard.
 - `docs/erd.md` documents the two-table normalized schema and SQL join.
 - This file records the implementation plan and current status.
 
@@ -271,13 +274,14 @@ LEFT JOIN country AS c
 - `country_lookup.csv` is downloaded by extract and is not committed.
 - The loader uses `TRUNCATE ... CASCADE` on `country`, which also clears
   `stations`; load `country` first, then `stations`.
-- `run_pipeline.py` is the only remaining implementation step.
 - The test suite mocks database writes, so live PostgreSQL connectivity is not
   exercised.
 - Existing databases created before the schema cleanup may still contain the old
   unused country columns; `CREATE TABLE IF NOT EXISTS` does not alter an
   existing table.
 - SQL results depend on the current API snapshot and country lookup.
+- The analytics dashboard is a point-in-time view; refreshing the snapshot
+  changes the numbers.
 
 ## Definition of done
 
@@ -287,12 +291,12 @@ LEFT JOIN country AS c
 - [x] Five analytical SQL files are implemented.
 - [x] All five SQL files run successfully against the local database.
 - [x] Test suite passes.
-- [ ] `run_pipeline.py` runs all stages in order.
+- [x] `run_pipeline.py` runs all stages in order.
 - [x] README, ERD, and implementation plan are updated.
 - [x] Unused country columns are removed from the `stations` DDL.
 
 ## Next actions
 
-1. Implement `run_pipeline.py` as the final step.
-2. Run the full pipeline once through the orchestrator.
-3. Optionally add a live PostgreSQL integration test.
+1. Optionally add a scheduler or continuous polling loop.
+2. Optionally add a live PostgreSQL integration test.
+3. Optionally rebuild the analytics dashboard after a data refresh.
