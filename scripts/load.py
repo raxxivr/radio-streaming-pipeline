@@ -51,9 +51,6 @@ def create_tables(db_engine=engine):
       codec         TEXT,
       bitrate       INTEGER,
       lastcheckok   INTEGER,
-      country_name  TEXT,
-      continent     TEXT,
-      sub_region    TEXT,
       loaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   """
